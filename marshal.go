@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-	"slices"
 	"strings"
 )
 
@@ -422,7 +421,7 @@ func keyUnmarshal(marshal JWKMarshal, options JWKMarshalOptions, validateOptions
 			marshalCopy.DP = marshal.DP
 			marshalCopy.DQ = marshal.DQ
 			marshalCopy.QI = marshal.QI
-			marshalCopy.OTH = slices.Clone(marshal.OTH)
+			marshalCopy.OTH = CloneSliceOtherPrimes(marshal.OTH)
 		} else {
 			key = &publicKey
 		}
@@ -459,19 +458,19 @@ func keyUnmarshal(marshal JWKMarshal, options JWKMarshalOptions, validateOptions
 		X5C: x5c,
 		X5U: marshal.X5U,
 	}
-	marshalCopy.X5C = slices.Clone(marshal.X5C)
+	marshalCopy.X5C = CloneSliceString(marshal.X5C)
 	marshalCopy.X5T = marshal.X5T
 	marshalCopy.X5TS256 = marshal.X5TS256
 	marshalCopy.X5U = marshal.X5U
 	metadata := JWKMetadataOptions{
 		ALG:    marshal.ALG,
 		KID:    marshal.KID,
-		KEYOPS: slices.Clone(marshal.KEYOPS),
+		KEYOPS: CloneSliceKEYOPS(marshal.KEYOPS),
 		USE:    marshal.USE,
 	}
 	marshalCopy.ALG = marshal.ALG
 	marshalCopy.KID = marshal.KID
-	marshalCopy.KEYOPS = slices.Clone(marshal.KEYOPS)
+	marshalCopy.KEYOPS = CloneSliceKEYOPS(marshal.KEYOPS)
 	marshalCopy.USE = marshal.USE
 	opts := JWKOptions{
 		Metadata: metadata,

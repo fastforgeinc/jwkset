@@ -10,7 +10,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"math/big"
-	"slices"
 	"testing"
 )
 
@@ -180,7 +179,7 @@ func TestMarshalECDSA(t *testing.T) {
 		if marshal.KID != myKeyID {
 			t.Fatal(`Marshaled parameter "kid" does not match original key.`)
 		}
-		if !slices.Equal(marshal.KEYOPS, keyOps) {
+		if !EqualSliceKEYOPS(marshal.KEYOPS, keyOps) {
 			t.Fatal(`Marshaled parameter "key_ops" does not match original key.`)
 		}
 		if marshal.USE != UseSig {

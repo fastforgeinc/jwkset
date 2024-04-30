@@ -15,7 +15,6 @@ import (
 	"math/big"
 	"net/http"
 	"net/url"
-	"slices"
 	"time"
 )
 
@@ -248,7 +247,7 @@ func (j JWK) Validate() error {
 		if j.marshal.KID != j.options.Metadata.KID {
 			return fmt.Errorf("%w: KID in marshal does not match KID in options", errors.Join(ErrJWKValidation, ErrOptions))
 		}
-		if !slices.Equal(j.marshal.KEYOPS, j.options.Metadata.KEYOPS) {
+		if !EqualSliceKEYOPS(j.marshal.KEYOPS, j.options.Metadata.KEYOPS) {
 			return fmt.Errorf("%w: KEYOPS in marshal does not match KEYOPS in options", errors.Join(ErrJWKValidation, ErrOptions))
 		}
 		if j.marshal.USE != j.options.Metadata.USE {

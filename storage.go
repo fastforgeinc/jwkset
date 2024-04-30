@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"slices"
 	"sync"
 	"time"
 )
@@ -85,7 +84,7 @@ func (m *MemoryJWKSet) KeyRead(_ context.Context, keyID string) (JWK, error) {
 func (m *MemoryJWKSet) KeyReadAll(_ context.Context) ([]JWK, error) {
 	m.mux.RLock()
 	defer m.mux.RUnlock()
-	return slices.Clone(m.set), nil
+	return CloneSliceJWK(m.set), nil
 }
 func (m *MemoryJWKSet) KeyWrite(_ context.Context, jwk JWK) error {
 	m.mux.Lock()
