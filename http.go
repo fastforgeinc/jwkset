@@ -23,7 +23,7 @@ type HTTPClientOptions struct {
 	Given Storage
 	// HTTPURLs are a mapping of HTTP URLs to JWK Set endpoints to storage implementations for the keys located at the
 	// URL. If empty, HTTP will not be used.
-	HTTPURLs map[string]Storage
+	HTTPURLs map[string]*HTTPStorage
 	// PrioritizeHTTP is a flag that indicates whether keys from the HTTP URL should be prioritized over keys from the
 	// given storage.
 	PrioritizeHTTP bool
@@ -37,17 +37,17 @@ type HTTPClientOptions struct {
 	storageOptions []HTTPClientStorageOption
 }
 
-// Client is a JWK Set client.
-type httpClient struct {
+// HTTPClient is a JWK Set client.
+type HTTPClient struct {
 	given             Storage
-	httpURLs          map[string]Storage
+	httpURLs          map[string]*HTTPStorage
 	prioritizeHTTP    bool
 	rateLimitWaitMax  time.Duration
 	refreshUnknownKID *rate.Limiter
 }
 
 // NewHTTPClient creates a new JWK Set client from remote HTTP resources.
-func NewHTTPClient(options HTTPClientOptions) (Storage, error) {
+func NewHTTPClient(options HTTPClientOptions) (*HTTPClient, error) {
 	if options.Given == nil && len(options.HTTPURLs) == 0 {
 		return nil, fmt.Errorf("%w: no given keys or HTTP URLs", ErrNewClient)
 	}
@@ -67,7 +67,7 @@ func NewHTTPClient(options HTTPClientOptions) (Storage, error) {
 	if given == nil {
 		given = NewMemoryStorage()
 	}
-	c := httpClient{
+	c := &HTTPClient{
 		given:             given,
 		httpURLs:          options.HTTPURLs,
 		prioritizeHTTP:    options.PrioritizeHTTP,
@@ -89,9 +89,9 @@ func NewDefaultHTTPClient(urls []string, opts ...HTTPClientOption) (Storage, err
 }
 
 // NewDefaultHTTPClientCtx is the same as NewDefaultHTTPClient, but with a context that can end the refresh goroutine.
-func NewDefaultHTTPClientCtx(ctx context.Context, urls []string, opts ...HTTPClientOption) (Storage, error) {
+func NewDefaultHTTPClientCtx(ctx context.Context, urls []string, opts ...HTTPClientOption) (*HTTPClient, error) {
 	clientOptions := &HTTPClientOptions{
-		HTTPURLs:          make(map[string]Storage),
+		HTTPURLs:          make(map[string]*HTTPStorage),
 		RateLimitWaitMax:  time.Minute,
 		RefreshUnknownKID: rate.NewLimiter(rate.Every(5*time.Minute), 1),
 	}
@@ -128,7 +128,7 @@ func NewDefaultHTTPClientCtx(ctx context.Context, urls []string, opts ...HTTPCli
 	return NewHTTPClient(*clientOptions)
 }
 
-func (c httpClient) KeyDelete(ctx context.Context, keyID string) (ok bool, err error) {
+func (c *HTTPClient) KeyDelete(ctx context.Context, keyID string) (ok bool, err error) {
 	ok, err = c.given.KeyDelete(ctx, keyID)
 	if err != nil && !errors.Is(err, ErrKeyNotFound) {
 		return false, fmt.Errorf("failed to delete key with ID %q from given storage due to error: %w", keyID, err)
@@ -147,7 +147,7 @@ func (c httpClient) KeyDelete(ctx context.Context, keyID string) (ok bool, err e
 	}
 	return false, nil
 }
-func (c httpClient) KeyRead(ctx context.Context, keyID string) (jwk JWK, err error) {
+func (c *HTTPClient) KeyRead(ctx context.Context, keyID string) (jwk JWK, err error) {
 	if !c.prioritizeHTTP {
 		jwk, err = c.given.KeyRead(ctx, keyID)
 		switch {
@@ -192,14 +192,10 @@ func (c httpClient) KeyRead(ctx context.Context, keyID string) (jwk JWK, err err
 			return JWK{}, fmt.Errorf("failed to wait for JWK Set refresh rate limiter due to error: %w", err)
 		}
 		for _, store := range c.httpURLs {
-			s, ok := store.(httpStorage)
-			if !ok {
-				continue
-			}
-			err = s.refresh(ctx)
+			err = store.refresh(ctx)
 			if err != nil {
-				if s.options.RefreshErrorHandler != nil {
-					s.options.RefreshErrorHandler(ctx, err)
+				if store.options.RefreshErrorHandler != nil {
+					store.options.RefreshErrorHandler(ctx, err)
 				}
 				continue
 			}
@@ -216,7 +212,7 @@ func (c httpClient) KeyRead(ctx context.Context, keyID string) (jwk JWK, err err
 	}
 	return JWK{}, fmt.Errorf("%w %q", ErrKeyNotFound, keyID)
 }
-func (c httpClient) KeyReadAll(ctx context.Context) ([]JWK, error) {
+func (c *HTTPClient) KeyReadAll(ctx context.Context) ([]JWK, error) {
 	jwks, err := c.given.KeyReadAll(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to snapshot given keys due to error: %w", err)
@@ -230,46 +226,46 @@ func (c httpClient) KeyReadAll(ctx context.Context) ([]JWK, error) {
 	}
 	return jwks, nil
 }
-func (c httpClient) KeyWrite(ctx context.Context, jwk JWK) error {
+func (c *HTTPClient) KeyWrite(ctx context.Context, jwk JWK) error {
 	return c.given.KeyWrite(ctx, jwk)
 }
 
-func (c httpClient) JSON(ctx context.Context) (json.RawMessage, error) {
+func (c *HTTPClient) JSON(ctx context.Context) (json.RawMessage, error) {
 	m, err := c.combineStorage(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to combine storage due to error: %w", err)
 	}
 	return m.JSON(ctx)
 }
-func (c httpClient) JSONPublic(ctx context.Context) (json.RawMessage, error) {
+func (c *HTTPClient) JSONPublic(ctx context.Context) (json.RawMessage, error) {
 	m, err := c.combineStorage(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to combine storage due to error: %w", err)
 	}
 	return m.JSONPublic(ctx)
 }
-func (c httpClient) JSONPrivate(ctx context.Context) (json.RawMessage, error) {
+func (c *HTTPClient) JSONPrivate(ctx context.Context) (json.RawMessage, error) {
 	m, err := c.combineStorage(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to combine storage due to error: %w", err)
 	}
 	return m.JSONPrivate(ctx)
 }
-func (c httpClient) JSONWithOptions(ctx context.Context, marshalOptions JWKMarshalOptions, validationOptions JWKValidateOptions) (json.RawMessage, error) {
+func (c *HTTPClient) JSONWithOptions(ctx context.Context, marshalOptions JWKMarshalOptions, validationOptions JWKValidateOptions) (json.RawMessage, error) {
 	m, err := c.combineStorage(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to combine storage due to error: %w", err)
 	}
 	return m.JSONWithOptions(ctx, marshalOptions, validationOptions)
 }
-func (c httpClient) Marshal(ctx context.Context) (JWKSMarshal, error) {
+func (c *HTTPClient) Marshal(ctx context.Context) (JWKSMarshal, error) {
 	m, err := c.combineStorage(ctx)
 	if err != nil {
 		return JWKSMarshal{}, fmt.Errorf("failed to combine storage due to error: %w", err)
 	}
 	return m.Marshal(ctx)
 }
-func (c httpClient) MarshalWithOptions(ctx context.Context, marshalOptions JWKMarshalOptions, validationOptions JWKValidateOptions) (JWKSMarshal, error) {
+func (c *HTTPClient) MarshalWithOptions(ctx context.Context, marshalOptions JWKMarshalOptions, validationOptions JWKValidateOptions) (JWKSMarshal, error) {
 	m, err := c.combineStorage(ctx)
 	if err != nil {
 		return JWKSMarshal{}, fmt.Errorf("failed to combine storage due to error: %w", err)
@@ -277,7 +273,7 @@ func (c httpClient) MarshalWithOptions(ctx context.Context, marshalOptions JWKMa
 	return m.MarshalWithOptions(ctx, marshalOptions, validationOptions)
 }
 
-func (c httpClient) combineStorage(ctx context.Context) (Storage, error) {
+func (c *HTTPClient) combineStorage(ctx context.Context) (Storage, error) {
 	jwks, err := c.KeyReadAll(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to snapshot keys due to error: %w", err)

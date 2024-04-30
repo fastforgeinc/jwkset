@@ -152,7 +152,7 @@ func TestClientError(t *testing.T) {
 }
 
 func TestClientJSON(t *testing.T) {
-	c := httpClient{
+	c := &HTTPClient{
 		given: NewMemoryStorage(),
 	}
 	testJSON(context.Background(), t, c)

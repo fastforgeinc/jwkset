@@ -49,19 +49,19 @@ type Storage interface {
 	MarshalWithOptions(ctx context.Context, marshalOptions JWKMarshalOptions, validationOptions JWKValidateOptions) (JWKSMarshal, error)
 }
 
-var _ Storage = &memoryJWKSet{}
+var _ Storage = new(MemoryJWKSet)
 
-type memoryJWKSet struct {
+type MemoryJWKSet struct {
 	set []JWK
 	mux sync.RWMutex
 }
 
 // NewMemoryStorage creates a new in-memory Storage implementation.
-func NewMemoryStorage() Storage {
-	return &memoryJWKSet{}
+func NewMemoryStorage() *MemoryJWKSet {
+	return new(MemoryJWKSet)
 }
 
-func (m *memoryJWKSet) KeyDelete(_ context.Context, keyID string) (ok bool, err error) {
+func (m *MemoryJWKSet) KeyDelete(_ context.Context, keyID string) (ok bool, err error) {
 	m.mux.Lock()
 	defer m.mux.Unlock()
 	for i, jwk := range m.set {
@@ -72,7 +72,7 @@ func (m *memoryJWKSet) KeyDelete(_ context.Context, keyID string) (ok bool, err 
 	}
 	return ok, nil
 }
-func (m *memoryJWKSet) KeyRead(_ context.Context, keyID string) (JWK, error) {
+func (m *MemoryJWKSet) KeyRead(_ context.Context, keyID string) (JWK, error) {
 	m.mux.RLock()
 	defer m.mux.RUnlock()
 	for _, jwk := range m.set {
@@ -82,12 +82,12 @@ func (m *memoryJWKSet) KeyRead(_ context.Context, keyID string) (JWK, error) {
 	}
 	return JWK{}, fmt.Errorf("%w: kid %q", ErrKeyNotFound, keyID)
 }
-func (m *memoryJWKSet) KeyReadAll(_ context.Context) ([]JWK, error) {
+func (m *MemoryJWKSet) KeyReadAll(_ context.Context) ([]JWK, error) {
 	m.mux.RLock()
 	defer m.mux.RUnlock()
 	return slices.Clone(m.set), nil
 }
-func (m *memoryJWKSet) KeyWrite(_ context.Context, jwk JWK) error {
+func (m *MemoryJWKSet) KeyWrite(_ context.Context, jwk JWK) error {
 	m.mux.Lock()
 	defer m.mux.Unlock()
 	for i, j := range m.set {
@@ -100,30 +100,30 @@ func (m *memoryJWKSet) KeyWrite(_ context.Context, jwk JWK) error {
 	return nil
 }
 
-func (m *memoryJWKSet) JSON(ctx context.Context) (json.RawMessage, error) {
+func (m *MemoryJWKSet) JSON(ctx context.Context) (json.RawMessage, error) {
 	jwks, err := m.Marshal(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal JWK Set: %w", err)
 	}
 	return json.Marshal(jwks)
 }
-func (m *memoryJWKSet) JSONPublic(ctx context.Context) (json.RawMessage, error) {
+func (m *MemoryJWKSet) JSONPublic(ctx context.Context) (json.RawMessage, error) {
 	return m.JSONWithOptions(ctx, JWKMarshalOptions{}, JWKValidateOptions{})
 }
-func (m *memoryJWKSet) JSONPrivate(ctx context.Context) (json.RawMessage, error) {
+func (m *MemoryJWKSet) JSONPrivate(ctx context.Context) (json.RawMessage, error) {
 	marshalOptions := JWKMarshalOptions{
 		Private: true,
 	}
 	return m.JSONWithOptions(ctx, marshalOptions, JWKValidateOptions{})
 }
-func (m *memoryJWKSet) JSONWithOptions(ctx context.Context, marshalOptions JWKMarshalOptions, validationOptions JWKValidateOptions) (json.RawMessage, error) {
+func (m *MemoryJWKSet) JSONWithOptions(ctx context.Context, marshalOptions JWKMarshalOptions, validationOptions JWKValidateOptions) (json.RawMessage, error) {
 	jwks, err := m.MarshalWithOptions(ctx, marshalOptions, validationOptions)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal JWK Set with options: %w", err)
 	}
 	return json.Marshal(jwks)
 }
-func (m *memoryJWKSet) Marshal(ctx context.Context) (JWKSMarshal, error) {
+func (m *MemoryJWKSet) Marshal(ctx context.Context) (JWKSMarshal, error) {
 	keys, err := m.KeyReadAll(ctx)
 	if err != nil {
 		return JWKSMarshal{}, fmt.Errorf("failed to read snapshot of all keys from storage: %w", err)
@@ -134,7 +134,7 @@ func (m *memoryJWKSet) Marshal(ctx context.Context) (JWKSMarshal, error) {
 	}
 	return jwks, nil
 }
-func (m *memoryJWKSet) MarshalWithOptions(ctx context.Context, marshalOptions JWKMarshalOptions, validationOptions JWKValidateOptions) (JWKSMarshal, error) {
+func (m *MemoryJWKSet) MarshalWithOptions(ctx context.Context, marshalOptions JWKMarshalOptions, validationOptions JWKValidateOptions) (JWKSMarshal, error) {
 	jwks := JWKSMarshal{}
 
 	keys, err := m.KeyReadAll(ctx)
@@ -209,17 +209,19 @@ type HTTPClientStorageOptions struct {
 	Storage Storage
 }
 
-type httpStorage struct {
+type HTTPStorage struct {
 	options HTTPClientStorageOptions
 	refresh func(ctx context.Context) error
 	Storage
 }
 
+var _ Storage = new(HTTPStorage)
+
 // NewStorageFromHTTP creates a new Storage implementation that processes a remote HTTP resource for a JWK Set. If
 // the RefreshInterval option is not set, the remote HTTP resource will be requested and processed before returning. If
 // the RefreshInterval option is set, a background goroutine will be launched to refresh the remote HTTP resource and
 // not block the return of this function.
-func NewStorageFromHTTP(u *url.URL, options HTTPClientStorageOptions) (Storage, error) {
+func NewStorageFromHTTP(u *url.URL, options HTTPClientStorageOptions) (*HTTPStorage, error) {
 	if options.Client == nil {
 		options.Client = http.DefaultClient
 	}
@@ -295,6 +297,12 @@ func NewStorageFromHTTP(u *url.URL, options HTTPClientStorageOptions) (Storage, 
 		}()
 	}
 
+	s := &HTTPStorage{
+		options: options,
+		refresh: refresh,
+		Storage: store,
+	}
+
 	ctx, cancel := context.WithTimeout(options.Ctx, options.HTTPTimeout)
 	defer cancel()
 	err := refresh(ctx)
@@ -304,15 +312,9 @@ func NewStorageFromHTTP(u *url.URL, options HTTPClientStorageOptions) (Storage, 
 			if options.RefreshErrorHandler != nil {
 				options.RefreshErrorHandler(ctx, err)
 			}
-			return store, nil
+			return s, nil
 		}
 		return nil, fmt.Errorf("failed to perform first HTTP request for JWK Set: %w", err)
-	}
-
-	s := httpStorage{
-		options: options,
-		refresh: refresh,
-		Storage: store,
 	}
 
 	return s, nil
